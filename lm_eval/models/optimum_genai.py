@@ -1,7 +1,7 @@
 import logging
 from importlib.util import find_spec
 import numpy as np
-from typing import List
+from typing import List, Optional
 import copy
 from tqdm import tqdm
 
@@ -14,7 +14,7 @@ eval_logger = logging.getLogger(__name__)
 
 
 @register_model("openvino_genai")
-class OpenVINOGenAILM(HFLM):
+class OptimumGenAILM(HFLM):
     """
     Using the OpenVINO GenAI backend from optimum-intel for accelerated inference
     on Intel architectures. This leverages the OpenVINO GenAI library for optimized
@@ -67,10 +67,14 @@ class OpenVINOGenAILM(HFLM):
         else:
             from optimum.intel.openvino_genai.modeling_base import OpenVINOGenAIModelForCausalLM
 
-        model_kwargs = kwargs if kwargs else {}
-        
-        # Pass the configuration dictionary to the model
+        model_kwargs = {}
         model_kwargs["config"] = self.config
+
+        # follow openvino GenAI defualt value
+        model_kwargs["MAX_PROMPT_LEN"] = kwargs.pop("max_prompt_len", 1024)
+        model_kwargs["MIN_RESPONSE_LEN"] = kwargs.pop("min_response_len", 150)
+        for key, value in kwargs.items():
+            model_kwargs[key] = value
         
         # Initialize the model with proper parameters
         self._model = OpenVINOGenAIModelForCausalLM(
