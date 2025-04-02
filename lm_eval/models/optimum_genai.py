@@ -58,6 +58,11 @@ class OptimumGenAILM(HFLM):
         revision="main",
         dtype="auto",
         trust_remote_code=False,
+        gpus=0,
+        offload_folder='./offload',
+        autogptq=False,
+        gptqmodel=False,
+        parallelize=False,
         **kwargs,
     ) -> None:
         if not find_spec("optimum"):
@@ -80,7 +85,6 @@ class OptimumGenAILM(HFLM):
         self._model = OpenVINOGenAIModelForCausalLM(
             model_path=pretrained,
             device=self.openvino_device,
-            trust_remote_code=trust_remote_code,
             **model_kwargs,
         )
     
@@ -150,7 +154,12 @@ class OptimumGenAILM(HFLM):
                 kwargs = copy.deepcopy(gen_kwargs)
                 stop_strings = kwargs.pop("until", None)
                 # Extract max_gen_toks if provided, otherwise use default
+                if "max_gen_toks" in kwargs.keys() and "max_new_tokens" in kwargs.keys():
+                    logging.warning("Set max_gen_toks and max_new_tokens in meantime, will set with max_new_tokens")
                 max_gen_toks = kwargs.pop("max_gen_toks", self.max_gen_toks)
+
+                if "max_new_tokens" in kwargs.keys():
+                    max_gen_toks = kwargs.pop("max_new_tokens")
             else:
                 raise ValueError(f"Expected kwargs to be of type dict but got {type(gen_kwargs)}")
             
