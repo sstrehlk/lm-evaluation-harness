@@ -88,23 +88,66 @@ class OptimumGenAILM(HFLM):
             **model_kwargs,
         )
     
+    @property
+    def ov_tokenizer(self):
+        """Access the OpenVINO tokenizer from the model"""
+        return self._model.ov_tokenizer
+    
     def loglikelihood(self, requests):
         """
-        Return a fake loglikelihood value for evaluation purposes.
-        OpenVINO GenAI models are focused on generation and don't support loglikelihood calculation.
+        Calculate loglikelihood using OpenVINO GenAI with echo=True to get prompt logprobs.
         """
-        eval_logger.warning(
-            "OpenVINO GenAI models don't support loglikelihood calculation. Returning fake values."
-        )
+        try:
+            from openvino_genai import GenerationConfig
+        except ImportError:
+            raise ModuleNotFoundError(
+                "package `openvino_genai` is not installed. Please install it via `pip install openvino-genai`"
+            )
         
         res = []
         for request in requests:
-            context, continuation = request
-            # Return a fake loglikelihood value and fake is_greedy flag
-            # These values are not meaningful and should not be used for actual evaluation
-            fake_loglikelihood = -1.0  # Fake value
-            fake_is_greedy = True      # Fake value
-            res.append((fake_loglikelihood, fake_is_greedy))
+            context, continuation = request.args
+            
+            # Combine context and continuation
+            whole_enc = self.ov_tokenizer.encode(context + continuation)
+            
+            # Use echo=True to get logprobs for all tokens including prompt
+            generation_config = GenerationConfig(
+                echo=True,
+                max_new_tokens=0,  # Don't generate new tokens, just compute logprobs
+                do_sample=False
+            )
+            
+            try:
+                # Get tokens, scores, and log_probs
+                output_tokens, score, log_probs = self._model(whole_enc, generation_config=generation_config)
+                
+                if len(log_probs) == 0:
+                    eval_logger.warning("Received empty log_probs, returning fake value")
+                    fake_loglikelihood = -1.0
+                    fake_is_greedy = True
+                    res.append((fake_loglikelihood, fake_is_greedy))
+                    continue
+                
+                # Encode context and continuation separately to find where continuation starts
+                context_enc = self.ov_tokenizer.encode(context)
+                context_len = len(context_enc.input_ids.data)
+                
+                # Extract continuation logprobs (skip context tokens)
+                continuation_log_probs = log_probs[context_len:]
+                
+                # Sum log probabilities for the continuation
+                answer = sum(continuation_log_probs)
+                
+                # Check if this is greedy (highest probability) - always True for greedy decoding
+                is_greedy = True
+                
+                res.append((answer, is_greedy))
+                
+            except Exception as e:
+                eval_logger.error(f"Error computing loglikelihood: {e}")
+                # Return fake value on error
+                res.append((-1.0, True))
         
         return res
 
