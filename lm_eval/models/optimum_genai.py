@@ -134,7 +134,9 @@ class OptimumGenAILM(HFLM):
                 context_len = len(context_enc.input_ids.data)
                 
                 # Extract continuation logprobs (skip context tokens)
-                continuation_log_probs = log_probs[context_len:]
+                # Note: log_probs array has prompt_len-1 elements (starts from token 1, not token 0)
+                # So continuation starts at index context_len-1
+                continuation_log_probs = log_probs[context_len - 1:]
                 
                 # Sum log probabilities for the continuation
                 answer = sum(continuation_log_probs)
