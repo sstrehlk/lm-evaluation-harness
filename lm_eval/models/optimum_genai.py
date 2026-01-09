@@ -131,12 +131,14 @@ class OptimumGenAILM(HFLM):
                 
                 # Encode context and continuation separately to find where continuation starts
                 context_enc = self.ov_tokenizer.encode(context)
-                context_len = len(context_enc.input_ids.data)
+                # context_enc.input_ids.data is a list containing one array, get the array length
+                context_tokens = context_enc.input_ids.data[0] if len(context_enc.input_ids.data) > 0 else []
+                context_len = len(context_tokens)
                 
-                # Extract continuation logprobs (skip context tokens)
-                # Note: log_probs array has prompt_len-1 elements (starts from token 1, not token 0)
-                # So continuation starts at index context_len-1
-                continuation_log_probs = log_probs[context_len - 1:]
+                # Extract continuation logprobs
+                # After fix: log_probs[i] is the log probability of token i (0-indexed)
+                # So continuation tokens start at context_len
+                continuation_log_probs = log_probs[context_len:]
                 
                 # Sum log probabilities for the continuation
                 answer = sum(continuation_log_probs)
