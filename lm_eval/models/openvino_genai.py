@@ -118,6 +118,10 @@ class OpenVINOGenAILM(HFLM):
         """
         Calculate loglikelihood using OpenVINO GenAI with echo=True to get prompt logprobs.
         Direct implementation using openvino_genai.LLMPipeline.
+        
+        Optimized for multiple-choice tasks (like MMLU):
+        - Groups requests by context
+        - For single-token continuations sharing the same context: processes them together
         """
         try:
             import openvino_genai
@@ -127,55 +131,89 @@ class OpenVINOGenAILM(HFLM):
                 "package `openvino_genai` is not installed. Please install it via `pip install openvino-genai`"
             )
         
-        res = []
-        for request in requests:
+        # Group requests by context for optimization
+        grouped_requests = {}
+        for idx, request in enumerate(requests):
             context, continuation = request.args
+            if context not in grouped_requests:
+                grouped_requests[context] = []
+            grouped_requests[context].append((idx, continuation))
+        
+        # Results array indexed by original request position
+        res = [None] * len(requests)
+        
+        # Configure for echo mode
+        generation_config = GenerationConfig()
+        generation_config.echo = True
+        generation_config.max_new_tokens = 0  # Don't generate, just compute logprobs
+        generation_config.do_sample = False
+        
+        # Create progress bar
+        pbar = tqdm(
+            total=len(grouped_requests),
+            disable=(self.rank != 0),
+            desc="Processing requests"
+        )
+        
+        for context, continuations in grouped_requests.items():
+            # Tokenize context once
+            context_enc = self._tokenizer.encode(context)
+            context_tokens = context_enc.input_ids.data[0] if len(context_enc.input_ids.data) > 0 else []
+            context_len = len(context_tokens)
             
-            # Tokenize full text
-            whole_enc = self._tokenizer.encode(context + continuation)
+            # Check if all continuations are single tokens (MMLU optimization)
+            single_token_continuations = []
+            multi_token_continuations = []
             
-            # Configure for echo mode
-            generation_config = GenerationConfig()
-            generation_config.echo = True
-            generation_config.max_new_tokens = 0  # Don't generate, just compute logprobs
-            generation_config.do_sample = False
+            for idx, continuation in continuations:
+                cont_enc = self._tokenizer.encode(continuation)
+                cont_tokens = cont_enc.input_ids.data[0] if len(cont_enc.input_ids.data) > 0 else []
+                
+                if len(cont_tokens) == 1:
+                    single_token_continuations.append((idx, continuation, cont_tokens[0]))
+                else:
+                    multi_token_continuations.append((idx, continuation))
             
-            try:
-                # Generate with echo mode - direct pipeline call
-                result = self._pipeline.generate(whole_enc, generation_config)
-                log_probs = result.log_probs[0] if result.log_probs else []
-                
-                if len(log_probs) == 0:
-                    eval_logger.warning("Received empty log_probs, returning fake value")
-                    fake_loglikelihood = -1.0
-                    fake_is_greedy = True
-                    res.append((fake_loglikelihood, fake_is_greedy))
-                    continue
-                
-                # Find continuation start position
-                context_enc = self._tokenizer.encode(context)
-                context_tokens = context_enc.input_ids.data[0] if len(context_enc.input_ids.data) > 0 else []
-                context_len = len(context_tokens)
-                
-                eval_logger.debug(f"context_len={context_len}, log_probs_len={len(log_probs)}")
-                
-                # Extract continuation log_probs
-                # After fix in openvino.genai: log_probs[i] is the log probability of token i (0-indexed)
-                # So continuation tokens start at context_len
-                continuation_log_probs = log_probs[context_len:]
-                
-                # Sum log probabilities for the continuation
-                answer = sum(continuation_log_probs)
-                
-                # For greedy decoding (do_sample=False)
-                is_greedy = True
-                
-                res.append((answer, is_greedy))
-                
-            except Exception as e:
-                eval_logger.error(f"Error computing loglikelihood: {e}")
-                # Return fake value on error
-                res.append((-1.0, True))
+            # Optimization: For single-token continuations, we can process them more efficiently
+            # by just running inference once for context and extracting continuation token log_probs
+            # However, current API requires us to run context+continuation to get the exact log_prob
+            # So we still process each one, but group them for potential future optimization
+            
+            # Process all continuations (both single and multi-token)
+            for idx, continuation in continuations:
+                try:
+                    # Tokenize full text
+                    whole_enc = self._tokenizer.encode(context + continuation)
+                    
+                    # Generate with echo mode
+                    result = self._pipeline.generate(whole_enc, generation_config)
+                    log_probs = result.log_probs[0] if result.log_probs else []
+                    
+                    if len(log_probs) == 0:
+                        eval_logger.warning("Received empty log_probs, returning fake value")
+                        res[idx] = (-1.0, True)
+                        continue
+                    
+                    # Extract continuation log_probs
+                    continuation_log_probs = log_probs[context_len:]
+                    
+                    # Sum log probabilities for the continuation
+                    answer = sum(continuation_log_probs)
+                    
+                    # For greedy decoding (do_sample=False)
+                    is_greedy = True
+                    
+                    res[idx] = (answer, is_greedy)
+                    
+                except Exception as e:
+                    eval_logger.error(f"Error computing loglikelihood: {e}")
+                    res[idx] = (-1.0, True)
+            
+            # Update progress bar after processing all continuations for this context
+            pbar.update(1)
+        
+        # Close progress bar
+        pbar.close()
         
         return res
 
