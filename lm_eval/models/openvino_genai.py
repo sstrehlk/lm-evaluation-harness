@@ -15,8 +15,8 @@ eval_logger = logging.getLogger(__name__)
 @register_model("openvino_genai")
 class OpenVINOGenAILM(HFLM):
     """
-    Direct OpenVINO GenAI backend for lm-evaluation-harness.
-    Uses openvino_genai library directly without optimum-intel layer.
+    OpenVINO GenAI backend for lm-evaluation-harness.
+    Uses openvino_genai library.
     
     This provides native integration with OpenVINO GenAI for accelerated inference
     on Intel architectures (CPU, GPU, NPU).
@@ -70,7 +70,7 @@ class OpenVINOGenAILM(HFLM):
         parallelize=False,
         **kwargs,
     ) -> None:
-        """Create OpenVINO GenAI pipeline directly without optimum-intel"""
+        """Create OpenVINO GenAI pipeline"""
         try:
             import openvino_genai
         except ImportError:
@@ -85,7 +85,7 @@ class OpenVINOGenAILM(HFLM):
             "disable_slice_optimization": True,
         }
         
-        # Create OpenVINO GenAI pipeline directly
+        # Create OpenVINO GenAI pipeline
         eval_logger.info(f"Creating OpenVINO GenAI pipeline: model={pretrained}, device={self.openvino_device}")
         self._pipeline = openvino_genai.LLMPipeline(
             models_path=pretrained,
