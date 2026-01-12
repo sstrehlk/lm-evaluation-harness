@@ -81,6 +81,8 @@ class OpenVINOGenAILM(HFLM):
 
         # Properties for LLMPipeline
         # disable_slice_optimization is REQUIRED for echo mode to work correctly
+        # Slice optimization transforms the model graph to compute only last token logits,
+        # which breaks echo mode that needs correct log_probs for all prompt positions
         pipeline_properties = {
             "disable_slice_optimization": True,
         }
