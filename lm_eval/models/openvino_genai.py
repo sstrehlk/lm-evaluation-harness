@@ -161,26 +161,83 @@ class OpenVINOGenAILM(HFLM):
             context_tokens = context_enc.input_ids.data[0] if len(context_enc.input_ids.data) > 0 else []
             context_len = len(context_tokens)
             
-            # Check if all continuations are single tokens (MMLU optimization)
+            # Group continuations by type for optimization
             single_token_continuations = []
             multi_token_continuations = []
             
+            # Get BOS token ID to strip it from continuations
+            # Different models use different BOS tokens:
+            # - Llama 3.x: 128000, Llama 2.x: 1, Mistral: 1, etc.
+            bos_token_id = getattr(self._tokenizer, 'bos_token_id', None)
+            
+            # If not available, try to detect it from a sample encoding
+            if bos_token_id is None and continuations:
+                # Encode a simple string and check if first token is a special token
+                # Common BOS patterns: very high ID (128000+) or ID=1
+                sample_enc = self._tokenizer.encode(" test")
+                sample_tokens = list(sample_enc.input_ids.data[0]) if len(sample_enc.input_ids.data) > 0 else []
+                if sample_tokens:
+                    first_token = sample_tokens[0]
+                    # Heuristic: if first token is 1 or >100000, it's likely BOS
+                    if first_token == 1 or first_token >= 100000:
+                        bos_token_id = first_token
+            
             for idx, continuation in continuations:
                 cont_enc = self._tokenizer.encode(continuation)
-                cont_tokens = cont_enc.input_ids.data[0] if len(cont_enc.input_ids.data) > 0 else []
+                cont_tokens = list(cont_enc.input_ids.data[0]) if len(cont_enc.input_ids.data) > 0 else []
+                
+                # Strip BOS token if present (tokenizer adds it when encoding separately)
+                if cont_tokens and bos_token_id is not None and cont_tokens[0] == bos_token_id:
+                    cont_tokens = cont_tokens[1:]
                 
                 if len(cont_tokens) == 1:
                     single_token_continuations.append((idx, continuation, cont_tokens[0]))
                 else:
                     multi_token_continuations.append((idx, continuation))
             
-            # Optimization: For single-token continuations, we can process them more efficiently
-            # by just running inference once for context and extracting continuation token log_probs
-            # However, current API requires us to run context+continuation to get the exact log_prob
-            # So we still process each one, but group them for potential future optimization
+            if single_token_continuations:
+                try:
+                    token_ids = [token_id for _, _, token_id in single_token_continuations]
+                    log_probs = self._pipeline.get_next_token_log_probs(context, token_ids)
+                    
+                    for (idx, continuation, token_id), log_prob in zip(single_token_continuations, log_probs):
+                        res[idx] = (float(log_prob), True)
+                except Exception as e:
+                    eval_logger.error(f"Error with get_next_token_log_probs: {e}, falling back to echo mode")
+                    # Fallback to echo mode for these requests
+                    for idx, continuation, _ in single_token_continuations:
+                        try:
+                            whole_enc = self._tokenizer.encode(context + continuation)
+                            result = self._pipeline.generate(whole_enc, generation_config)
+                            log_probs = result.log_probs[0] if result.log_probs else []
+                            
+                            if len(log_probs) == 0:
+                                eval_logger.warning("Received empty log_probs, returning fake value")
+                                res[idx] = (-1.0, True)
+                                continue
+
+                            # Extract continuation log_probs
+                            context_tokens = self._tokenizer.encode(context)
+                            continuation_tokens = self._tokenizer.encode(continuation)
+                            if len(continuation_tokens) > 0 and continuation_tokens[0] == self._detect_bos_token_id():
+                                continuation_tokens = continuation_tokens[1:]
+
+                            continuation_start_idx = len(context_tokens)
+                            continuation_log_probs = log_probs[continuation_start_idx:continuation_start_idx+len(continuation_tokens)]
+
+                            answer = sum(continuation_log_probs)
+                            res[idx] = (answer, True)
+                        except Exception as e2:
+                            eval_logger.error(f"Error in fallback: {e2}")
+                            res[idx] = (-1.0, True)
+            else:
+                # Move single-token continuations to multi-token list for echo mode processing
+                if single_token_continuations:
+                    for idx, continuation, _ in single_token_continuations:
+                        multi_token_continuations.append((idx, continuation))
             
-            # Process all continuations (both single and multi-token)
-            for idx, continuation in continuations:
+            # Process multi-token continuations with echo mode
+            for idx, continuation in multi_token_continuations:
                 try:
                     # Tokenize full text
                     whole_enc = self._tokenizer.encode(context + continuation)
@@ -195,7 +252,16 @@ class OpenVINOGenAILM(HFLM):
                         continue
                     
                     # Extract continuation log_probs
-                    continuation_log_probs = log_probs[context_len:]
+                    # log_probs[i] = P(token[i] | tokens[0:i-1])
+                    # For continuation starting at index context_len, we need log_probs starting from context_len
+                    context_tokens = self._tokenizer.encode(context)
+                    continuation_tokens = self._tokenizer.encode(continuation)
+                    # Account for BOS token if present
+                    if len(continuation_tokens) > 0 and continuation_tokens[0] == self._detect_bos_token_id():
+                        continuation_tokens = continuation_tokens[1:]
+                    
+                    continuation_start_idx = len(context_tokens)
+                    continuation_log_probs = log_probs[continuation_start_idx:continuation_start_idx+len(continuation_tokens)]
                     
                     # Sum log probabilities for the continuation
                     answer = sum(continuation_log_probs)
