@@ -79,20 +79,14 @@ class OpenVINOGenAILM(HFLM):
                 "Please install it via `pip install openvino-genai`"
             )
 
-        # Properties for LLMPipeline
-        # disable_slice_optimization is REQUIRED for echo mode to work correctly
-        # Slice optimization transforms the model graph to compute only last token logits,
-        # which breaks echo mode that needs correct log_probs for all prompt positions
-        pipeline_properties = {
-            "disable_slice_optimization": True,
-        }
-        
         # Create OpenVINO GenAI pipeline
+        # Slice optimization is always enabled - it works correctly with our optimized get_next_token_log_probs
+        # Force stateful pipeline (not continuous batching) to use get_next_token_log_probs
         eval_logger.info(f"Creating OpenVINO GenAI pipeline: model={pretrained}, device={self.openvino_device}")
         self._pipeline = openvino_genai.LLMPipeline(
             models_path=pretrained,
             device=self.openvino_device,
-            **pipeline_properties,
+            **{"ATTENTION_BACKEND": "SDPA"}  # Force stateful pipeline (SDPA), not continuous batching (PA)
         )
         
         # Get tokenizer from pipeline
@@ -230,11 +224,6 @@ class OpenVINOGenAILM(HFLM):
                         except Exception as e2:
                             eval_logger.error(f"Error in fallback: {e2}")
                             res[idx] = (-1.0, True)
-            else:
-                # Move single-token continuations to multi-token list for echo mode processing
-                if single_token_continuations:
-                    for idx, continuation, _ in single_token_continuations:
-                        multi_token_continuations.append((idx, continuation))
             
             # Process multi-token continuations with echo mode
             for idx, continuation in multi_token_continuations:
@@ -273,7 +262,7 @@ class OpenVINOGenAILM(HFLM):
                     
                 except Exception as e:
                     eval_logger.error(f"Error computing loglikelihood: {e}")
-                    res[idx] = (-1.0, True)
+                    # res[idx] = (-1.0, True)
             
             # Update progress bar after processing all continuations for this context
             pbar.update(1)
