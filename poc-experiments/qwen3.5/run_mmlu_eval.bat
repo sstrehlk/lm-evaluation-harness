@@ -21,6 +21,10 @@ set THINK=0
 REM --- Force UTF-8 output (avoids cp1252 crash on Greek/math chars in MMLU) ---
 set PYTHONUTF8=1
 
+REM --- Offline mode: skip HF Hub connectivity checks (dataset + tokenizer) ---
+set HF_DATASETS_OFFLINE=1
+set TRANSFORMERS_OFFLINE=1
+
 REM --- Log file (timestamped) ---
 for /f "tokens=1-6 delims=/:. " %%a in ("%date% %time: =0%") do (
     set TIMESTAMP=%%c%%a%%b_%%d%%e%%f
