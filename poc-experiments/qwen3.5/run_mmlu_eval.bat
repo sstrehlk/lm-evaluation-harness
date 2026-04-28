@@ -18,10 +18,19 @@ set LIMIT=50
 set NUM_FEWSHOT=0
 set THINK=0
 
+REM --- Log file (timestamped) ---
+for /f "tokens=1-6 delims=/:. " %%a in ("%date% %time: =0%") do (
+    set TIMESTAMP=%%c%%a%%b_%%d%%e%%f
+)
+set LOG=%~dp0mmlu_eval_%TIMESTAMP%.log
+
 REM --- Create work dir ---
 if not exist "%WORK_DIR%" mkdir "%WORK_DIR%"
 
-REM --- Run ---
+echo [*] Log file: %LOG%
+echo [*] Starting evaluation...
+
+REM --- Run (output to console AND log file) ---
 python "%~dp0mmlu_eval_logits.py" ^
     --exe        "%EXE%"          ^
     --model      "%MODEL%"        ^
@@ -30,6 +39,9 @@ python "%~dp0mmlu_eval_logits.py" ^
     --dataset-cache "%DATASET_CACHE%" ^
     --work-dir   "%WORK_DIR%"     ^
     --output     "%OUTPUT%"       ^
-    --think      %THINK%
+    --think      %THINK%          ^
+    2>&1 | tee "%LOG%"
 
+echo.
+echo [*] Done. Log saved to: %LOG%
 pause
