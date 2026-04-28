@@ -25,6 +25,7 @@ import os
 import struct
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -361,15 +362,38 @@ def main():
     # ---- evaluation loop -------------------------------------------------
     results = []
     correct = 0
+    durations: list = []
+    eval_start = time.monotonic()
+
+    def _fmt_seconds(s):
+        s = int(s)
+        h, rem = divmod(s, 3600)
+        m, sec = divmod(rem, 60)
+        if h:
+            return f"{h}h {m:02d}m {sec:02d}s"
+        if m:
+            return f"{m}m {sec:02d}s"
+        return f"{sec}s"
 
     for i, doc in enumerate(test_docs):
         true_label = LABEL_MAP[doc["answer"]]
         prompt = format_prompt(doc, fewshot_docs)
 
         subject_str = doc.get("subject", "?")
-        print(f"\n[{i+1}/{len(test_docs)}] {subject_str}", flush=True)
+
+        # ETA based on average of completed samples
+        if durations:
+            avg = sum(durations) / len(durations)
+            eta = _fmt_seconds(avg * (len(test_docs) - i))
+            elapsed = _fmt_seconds(time.monotonic() - eval_start)
+            timing_str = f"  avg={avg:.1f}s  elapsed={elapsed}  ETA={eta}"
+        else:
+            timing_str = ""
+
+        print(f"\n[{i+1}/{len(test_docs)}] {subject_str}{timing_str}", flush=True)
         print(f"  Q: {doc['question'][:100].strip()} …", flush=True)
 
+        t0 = time.monotonic()
         logits = run_exe(
             exe_path=args.exe,
             model_path=args.model,
@@ -377,19 +401,25 @@ def main():
             work_dir=work_dir,
             think=args.think,
         )
+        sample_time = time.monotonic() - t0
+        durations.append(sample_time)
 
         if logits is None:
+            print(f"  Time: {sample_time:.1f}s", flush=True)
             results.append({
                 "idx": i, "subject": subject_str,
                 "pred": None, "true": true_label, "correct": False,
+                "time_s": round(sample_time, 2),
             })
             continue
 
         pred, scores = predict_answer(logits, choice_token_ids)
         is_correct = pred == true_label
         correct += int(is_correct)
+        acc_so_far = correct / (i + 1)
 
-        print(f"  Pred: {pred}   True: {true_label}   {'OK' if is_correct else 'FAIL'}", flush=True)
+        print(f"  Pred: {pred}   True: {true_label}   {'OK' if is_correct else 'FAIL'}"
+              f"   acc={acc_so_far:.3f}   time={sample_time:.1f}s", flush=True)
         print(f"  Logit scores: { {k: f'{v:.3f}' for k, v in scores.items()} }", flush=True)
 
         results.append({
@@ -400,20 +430,27 @@ def main():
             "true": true_label,
             "correct": is_correct,
             "scores": {k: float(v) for k, v in scores.items()},
+            "time_s": round(sample_time, 2),
         })
 
     # ---- summary ---------------------------------------------------------
     total = len(results)
     accuracy = correct / total if total else 0.0
+    total_elapsed = time.monotonic() - eval_start
+    avg_time = sum(durations) / len(durations) if durations else 0.0
 
     print(f"\n{'='*55}")
-    print(f"Accuracy : {accuracy:.4f}   ({correct}/{total})")
+    print(f"Accuracy      : {accuracy:.4f}   ({correct}/{total})")
+    print(f"Total time    : {_fmt_seconds(total_elapsed)}")
+    print(f"Avg per sample: {avg_time:.1f}s")
     print(f"{'='*55}")
 
     output_data = {
         "accuracy": accuracy,
         "correct": correct,
         "total": total,
+        "total_time_s": round(total_elapsed, 1),
+        "avg_time_per_sample_s": round(avg_time, 2),
         "config": {
             "exe": args.exe,
             "model": args.model,
