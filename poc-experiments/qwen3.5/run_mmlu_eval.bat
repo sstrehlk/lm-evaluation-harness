@@ -18,6 +18,9 @@ set LIMIT=50
 set NUM_FEWSHOT=0
 set THINK=0
 
+REM --- Force UTF-8 output (avoids cp1252 crash on Greek/math chars in MMLU) ---
+set PYTHONUTF8=1
+
 REM --- Log file (timestamped) ---
 for /f "tokens=1-6 delims=/:. " %%a in ("%date% %time: =0%") do (
     set TIMESTAMP=%%c%%a%%b_%%d%%e%%f

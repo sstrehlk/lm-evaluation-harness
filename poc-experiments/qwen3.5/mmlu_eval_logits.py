@@ -19,6 +19,7 @@ Requirements:
 """
 
 import argparse
+import io
 import json
 import os
 import struct
@@ -27,6 +28,12 @@ import sys
 from pathlib import Path
 
 import numpy as np
+
+# Force UTF-8 output on Windows (avoids cp1252 UnicodeEncodeError for Greek/math chars)
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+if sys.stderr.encoding and sys.stderr.encoding.lower() != "utf-8":
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 
 # ---------------------------------------------------------------------------
