@@ -7,14 +7,14 @@ REM  Then double-click the file or run it from a cmd prompt.
 REM ============================================================
 
 REM --- Paths ---
-set EXE=C:\Release\modeling_qwen3_5_logits.exe
-set MODEL=C:\models\Qwen3.5-35B-A3B
-set DATASET_CACHE=C:\datasets
+set EXE=C:\sstrehlk\package_0416\Release\modeling_qwen3_5_logits.exe
+set MODEL=C:\sstrehlk\models\qwen3.5-35b-a3e
+set DATASET_CACHE=C:\sstrehlk\datasets
 set WORK_DIR=%~dp0logits_tmp
 set OUTPUT=%~dp0mmlu_results.json
 
 REM --- Evaluation settings ---
-set LIMIT=50
+set LIMIT=1000
 set NUM_FEWSHOT=0
 set THINK=0
 
