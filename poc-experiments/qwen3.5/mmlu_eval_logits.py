@@ -66,7 +66,7 @@ def build_choice_token_ids(model_path: str) -> dict:
     """
     from transformers import AutoTokenizer
 
-    print(f"[*] Loading tokenizer from: {model_path}")
+    print(f"[*] Loading tokenizer from: {model_path}", flush=True)
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
     choice_ids: dict[str, int] = {}
@@ -85,7 +85,7 @@ def build_choice_token_ids(model_path: str) -> dict:
                 f"  WARNING: ' {label}' encodes to {ids}; using first token {ids[0]}"
             )
 
-    print(f"[*] Choice token IDs: {choice_ids}")
+    print(f"[*] Choice token IDs: {choice_ids}", flush=True)
     return tokenizer, choice_ids
 
 
@@ -164,7 +164,7 @@ def load_mmlu_combined(dataset_cache: str | None = None, shuffle_seed: int = 117
 
     all_test, all_dev = [], []
 
-    print(f"[*] Loading {len(MMLU_SUBJECTS)} MMLU subjects...")
+    print(f"[*] Loading {len(MMLU_SUBJECTS)} MMLU subjects...", flush=True)
     for i, subject in enumerate(MMLU_SUBJECTS, 1):
         try:
             test_ds = hf_datasets.load_dataset(
@@ -187,14 +187,14 @@ def load_mmlu_combined(dataset_cache: str | None = None, shuffle_seed: int = 117
             all_dev.append(d)
 
         if i % 10 == 0:
-            print(f"  {i}/{len(MMLU_SUBJECTS)} subjects loaded …")
+            print(f"  {i}/{len(MMLU_SUBJECTS)} subjects loaded …", flush=True)
 
     # Shuffle test docs with fixed seed (matching mmlu_combined_shuffled task)
     import random
     rng = random.Random(shuffle_seed)
     rng.shuffle(all_test)
 
-    print(f"[*] Total test: {len(all_test)},  dev: {len(all_dev)}")
+    print(f"[*] Total test: {len(all_test)},  dev: {len(all_dev)}", flush=True)
     return all_test, all_dev
 
 
@@ -352,7 +352,7 @@ def main():
     fewshot_docs = all_dev[: args.num_fewshot] if args.num_fewshot > 0 else None
 
     print(f"[*] Evaluating {len(test_docs)} samples  "
-          f"(fewshot={args.num_fewshot}, think={args.think})")
+          f"(fewshot={args.num_fewshot}, think={args.think})", flush=True)
 
     # ---- work dir --------------------------------------------------------
     work_dir = str(Path(args.work_dir).resolve())
@@ -367,8 +367,8 @@ def main():
         prompt = format_prompt(doc, fewshot_docs)
 
         subject_str = doc.get("subject", "?")
-        print(f"\n[{i+1}/{len(test_docs)}] {subject_str}")
-        print(f"  Q: {doc['question'][:100].strip()} …")
+        print(f"\n[{i+1}/{len(test_docs)}] {subject_str}", flush=True)
+        print(f"  Q: {doc['question'][:100].strip()} …", flush=True)
 
         logits = run_exe(
             exe_path=args.exe,
@@ -389,8 +389,8 @@ def main():
         is_correct = pred == true_label
         correct += int(is_correct)
 
-        print(f"  Pred: {pred}   True: {true_label}   {'OK' if is_correct else 'FAIL'}")
-        print(f"  Logit scores: { {k: f'{v:.3f}' for k, v in scores.items()} }")
+        print(f"  Pred: {pred}   True: {true_label}   {'OK' if is_correct else 'FAIL'}", flush=True)
+        print(f"  Logit scores: { {k: f'{v:.3f}' for k, v in scores.items()} }", flush=True)
 
         results.append({
             "idx": i,
