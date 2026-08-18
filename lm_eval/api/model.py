@@ -396,8 +396,18 @@ class TemplateLM(LM):
             whole_enc = self.tok_encode(context + continuation)
             context_enc = self.tok_encode(context)
 
-            context_enc_len = len(context_enc)
-            continuation_enc = whole_enc[context_enc_len:]
+            # BPE merges can span the context/continuation boundary (e.g.
+            # "Answer:" + "A" -> a single ":A" token), so context_enc is not
+            # guaranteed to be a prefix of whole_enc of the same length.
+            # Split on the longest common token prefix instead of assuming
+            # a fixed-length split, so any merged boundary token is kept as
+            # part of the continuation rather than being silently dropped.
+            common_prefix_len = 0
+            for tok_a, tok_b in zip(context_enc, whole_enc):
+                if tok_a != tok_b:
+                    break
+                common_prefix_len += 1
+            continuation_enc = whole_enc[common_prefix_len:]
         else:
             # for SEQ2SEQ case we need to encode separately
             context_enc = self.tok_encode(context)
